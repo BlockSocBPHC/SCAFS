@@ -1,0 +1,182 @@
+[
+    {
+        "id": "C4-2023-01-REENTRANCY-01",
+        "source": "Code4rena",
+        "bug_type": "Reentrancy",
+        "severity": "HIGH",
+        "description": "The withdraw function transfers ETH to the user before updating their balance, allowing a malicious contract to reenter the function and drain the vault.",
+        "original_contract": "pragma solidity ^0.8.0;\n\ncontract Vault {\n    mapping(address => uint256) public balances;\n\n    function deposit() public payable {\n        balances[msg.sender] += msg.value;\n    }\n\n    function withdraw(uint256 amount) public {\n        require(balances[msg.sender] >= amount, \"Insufficient balance\");\n        \n        // VULNERABLE: State update after external call\n        (bool success, ) = msg.sender.call{value: amount}(\"\");\n        require(success, \"Transfer failed\");\n        \n        balances[msg.sender] -= amount;\n    }\n}",
+        "fixed_contract": "pragma solidity ^0.8.0;\n\ncontract Vault {\n    mapping(address => uint256) public balances;\n\n    function deposit() public payable {\n        balances[msg.sender] += msg.value;\n    }\n\n    function withdraw(uint256 amount) public {\n        require(balances[msg.sender] >= amount, \"Insufficient balance\");\n        \n        // FIXED: Checks-Effects-Interactions pattern applied\n        balances[msg.sender] -= amount;\n        \n        (bool success, ) = msg.sender.call{value: amount}(\"\");\n        require(success, \"Transfer failed\");\n    }\n}"
+    },
+    {
+        "id": "C4-2023-05-ACCESS-02",
+        "source": "Solodit",
+        "bug_type": "Access Control",
+        "severity": "HIGH",
+        "description": "The setFeeRate function allows anyone to change the protocol fee because it is missing the onlyOwner modifier.",
+        "original_contract": "pragma solidity ^0.8.0;\n\ncontract Protocol {\n    address public owner;\n    uint256 public feeRate;\n\n    constructor() {\n        owner = msg.sender;\n        feeRate = 100;\n    }\n\n    // VULNERABLE: Anyone can call this\n    function setFeeRate(uint256 newRate) public {\n        require(newRate <= 500, \"Fee too high\");\n        feeRate = newRate;\n    }\n}",
+        "fixed_contract": "pragma solidity ^0.8.0;\n\ncontract Protocol {\n    address public owner;\n    uint256 public feeRate;\n\n    modifier onlyOwner() {\n        require(msg.sender == owner, \"Not owner\");\n        _;\n    }\n\n    constructor() {\n        owner = msg.sender;\n        feeRate = 100;\n    }\n\n    // FIXED: Modifier added\n    function setFeeRate(uint256 newRate) public onlyOwner {\n        require(newRate <= 500, \"Fee too high\");\n        feeRate = newRate;\n    }\n}"
+    },
+    {
+        "id": "C4-2023-08-VALIDATION-03",
+        "source": "Code4rena",
+        "bug_type": "Input Validation",
+        "severity": "LOW",
+        "description": "The changeOwner function does not prevent transferring ownership to the zero address, which could permanently lock the contract.",
+        "original_contract": "pragma solidity ^0.8.0;\n\ncontract Ownable {\n    address public owner;\n\n    constructor() {\n        owner = msg.sender;\n    }\n\n    function changeOwner(address newOwner) public {\n        require(msg.sender == owner, \"Not owner\");\n        // VULNERABLE: Missing zero address check\n        owner = newOwner;\n    }\n}",
+        "fixed_contract": "pragma solidity ^0.8.0;\n\ncontract Ownable {\n    address public owner;\n\n    constructor() {\n        owner = msg.sender;\n    }\n\n    function changeOwner(address newOwner) public {\n        require(msg.sender == owner, \"Not owner\");\n        // FIXED: Added zero address check\n        require(newOwner != address(0), \"Invalid address\");\n        owner = newOwner;\n    }\n}"
+    },
+    {
+        "id": "C4-2023-11-ERC20-04",
+        "source": "Solodit",
+        "bug_type": "Unsafe ERC20",
+        "severity": "MEDIUM",
+        "description": "The contract uses raw transfer() for ERC20 tokens. If the token doesn't revert on failure and just returns false (like USDT), the contract will silently fail to transfer while still updating state.",
+        "original_contract": "pragma solidity ^0.8.0;\ninterface IERC20 { function transfer(address to, uint256 amount) external returns (bool); }\n\ncontract TokenLocker {\n    mapping(address => uint256) public deposits;\n    IERC20 public token;\n\n    function withdraw(uint256 amount) public {\n        require(deposits[msg.sender] >= amount, \"Insufficient\");\n        deposits[msg.sender] -= amount;\n        // VULNERABLE: Return value of transfer is not checked\n        token.transfer(msg.sender, amount);\n    }\n}",
+        "fixed_contract": "pragma solidity ^0.8.0;\nimport \"@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol\";\ninterface IERC20 { function transfer(address to, uint256 amount) external returns (bool); }\n\ncontract TokenLocker {\n    using SafeERC20 for IERC20;\n    mapping(address => uint256) public deposits;\n    IERC20 public token;\n\n    function withdraw(uint256 amount) public {\n        require(deposits[msg.sender] >= amount, \"Insufficient\");\n        deposits[msg.sender] -= amount;\n        // FIXED: SafeERC20 ensures reverts on failure\n        token.safeTransfer(msg.sender, amount);\n    }\n}"
+    },
+    {
+        "id": "C4-2024-02-TXORIGIN-05",
+        "source": "Code4rena",
+        "bug_type": "Authentication",
+        "severity": "HIGH",
+        "description": "Using tx.origin for authentication makes the contract vulnerable to phishing attacks. If the owner interacts with a malicious contract, that contract can call this function and pass the tx.origin check.",
+        "original_contract": "pragma solidity ^0.8.0;\n\ncontract Treasury {\n    address public owner;\n\n    constructor() { owner = msg.sender; }\n\n    function withdrawAll(address payable to) public {\n        // VULNERABLE: tx.origin can be spoofed via phishing\n        require(tx.origin == owner, \"Not owner\");\n        to.transfer(address(this).balance);\n    }\n}",
+        "fixed_contract": "pragma solidity ^0.8.0;\n\ncontract Treasury {\n    address public owner;\n\n    constructor() { owner = msg.sender; }\n\n    function withdrawAll(address payable to) public {\n        // FIXED: Use msg.sender for direct caller authentication\n        require(msg.sender == owner, \"Not owner\");\n        to.transfer(address(this).balance);\n    }\n}"
+    },
+    {
+        "id": "C4-2024-03-SELFDESTRUCT-06",
+        "source": "Solodit",
+        "bug_type": "Access Control",
+        "severity": "CRITICAL",
+        "description": "An unprotected selfdestruct function allows any user to destroy the contract and steal all held ETH.",
+        "original_contract": "pragma solidity ^0.8.0;\n\ncontract Bank {\n    mapping(address => uint256) balances;\n    address payable public admin;\n\n    constructor() { admin = payable(msg.sender); }\n\n    // VULNERABLE: Missing modifier\n    function kill() public {\n        selfdestruct(admin);\n    }\n}",
+        "fixed_contract": "pragma solidity ^0.8.0;\n\ncontract Bank {\n    mapping(address => uint256) balances;\n    address payable public admin;\n\n    modifier onlyAdmin() {\n        require(msg.sender == admin, \"Not admin\");\n        _;\n    }\n\n    constructor() { admin = payable(msg.sender); }\n\n    // FIXED: Only admin can destroy\n    function kill() public onlyAdmin {\n        selfdestruct(admin);\n    }\n}"
+    },
+    {
+        "id": "C4-2024-04-DOS-07",
+        "source": "Code4rena",
+        "bug_type": "Denial of Service",
+        "severity": "MEDIUM",
+        "description": "Iterating over an array of users and sending ETH (Push pattern) can cause a Denial of Service. If one user is a smart contract that rejects ETH, the entire transaction reverts, preventing all other users from receiving funds.",
+        "original_contract": "pragma solidity ^0.8.0;\n\ncontract DividendDistributor {\n    address payable[] public investors;\n\n    function distribute(uint256 amountPerInvestor) public {\n        // VULNERABLE: Push pattern inside a loop\n        for (uint i = 0; i < investors.length; i++) {\n            (bool success, ) = investors[i].call{value: amountPerInvestor}(\"\");\n            require(success, \"Transfer failed\");\n        }\n    }\n}",
+        "fixed_contract": "pragma solidity ^0.8.0;\n\ncontract DividendDistributor {\n    mapping(address => uint256) public pendingWithdrawals;\n    address[] public investors;\n\n    function distribute(uint256 amountPerInvestor) public {\n        // FIXED: Pull pattern. Allocate funds in state.\n        for (uint i = 0; i < investors.length; i++) {\n            pendingWithdrawals[investors[i]] += amountPerInvestor;\n        }\n    }\n\n    function withdraw() public {\n        uint256 amount = pendingWithdrawals[msg.sender];\n        require(amount > 0, \"No funds\");\n        pendingWithdrawals[msg.sender] = 0;\n        (bool success, ) = msg.sender.call{value: amount}(\"\");\n        require(success, \"Transfer failed\");\n    }\n}"
+    },
+    {
+        "id": "C4-2024-06-ORACLE-08",
+        "source": "Solodit",
+        "bug_type": "Economic Logic",
+        "severity": "CRITICAL",
+        "description": "The contract calculates the price of an asset using the instantaneous spot balance of a Uniswap pool. This is highly vulnerable to flash loan price manipulation.",
+        "original_contract": "pragma solidity ^0.8.0;\ninterface IUniswapV2Pair { function getReserves() external view returns (uint112, uint112, uint32); }\n\ncontract Lending {\n    IUniswapV2Pair public pair;\n\n    function getCollateralValue(uint256 amount) public view returns (uint256) {\n        // VULNERABLE: Uses spot reserves which can be manipulated in a single block\n        (uint112 reserve0, uint112 reserve1, ) = pair.getReserves();\n        uint256 price = uint256(reserve1) / uint256(reserve0);\n        return amount * price;\n    }\n}",
+        "fixed_contract": "pragma solidity ^0.8.0;\ninterface IOracle { function consult(address token, uint amountIn) external view returns (uint amountOut); }\n\ncontract Lending {\n    IOracle public twapOracle;\n    address public token0;\n\n    function getCollateralValue(uint256 amount) public view returns (uint256) {\n        // FIXED: Uses a Time-Weighted Average Price (TWAP) oracle\n        return twapOracle.consult(token0, amount);\n    }\n}"
+    },
+    {
+        "id": "C4-2024-07-UNDERFLOW-09",
+        "source": "Code4rena",
+        "bug_type": "Integer Underflow",
+        "severity": "HIGH",
+        "description": "In Solidity versions prior to 0.8.0, arithmetic operations wrap around. This contract uses 0.7.0 and does not use SafeMath, allowing an underflow to mint infinite tokens.",
+        "original_contract": "pragma solidity ^0.7.0;\n\ncontract OldToken {\n    mapping(address => uint256) public balances;\n\n    function transfer(address to, uint256 amount) public {\n        // VULNERABLE: Underflow is possible here in 0.7.0\n        require(balances[msg.sender] - amount >= 0, \"Insufficient\");\n        balances[msg.sender] -= amount;\n        balances[to] += amount;\n    }\n}",
+        "fixed_contract": "pragma solidity ^0.7.0;\nimport \"@openzeppelin/contracts/math/SafeMath.sol\";\n\ncontract OldToken {\n    using SafeMath for uint256;\n    mapping(address => uint256) public balances;\n\n    function transfer(address to, uint256 amount) public {\n        // FIXED: Using SafeMath prevents underflow\n        balances[msg.sender] = balances[msg.sender].sub(amount, \"Insufficient\");\n        balances[to] = balances[to].add(amount);\n    }\n}"
+    },
+    {
+        "id": "C4-2024-08-FRONTRUN-10",
+        "source": "Solodit",
+        "bug_type": "Front-running",
+        "severity": "MEDIUM",
+        "description": "The swap function does not implement a deadline check. A miner or MEV bot can hold the transaction and execute it later when market conditions are unfavorable to the user (slippage/front-running).",
+        "original_contract": "pragma solidity ^0.8.0;\n\ncontract AMM {\n    function swap(uint256 amountIn, uint256 minAmountOut) public {\n        // VULNERABLE: No deadline protection. Transaction can be mined anytime.\n        uint256 amountOut = _calculateOut(amountIn);\n        require(amountOut >= minAmountOut, \"Slippage\");\n        _executeSwap(msg.sender, amountIn, amountOut);\n    }\n\n    function _calculateOut(uint256 amount) internal pure returns (uint256) { return amount * 2; }\n    function _executeSwap(address user, uint256 inAmt, uint256 outAmt) internal { }\n}",
+        "fixed_contract": "pragma solidity ^0.8.0;\n\ncontract AMM {\n    function swap(uint256 amountIn, uint256 minAmountOut, uint256 deadline) public {\n        // FIXED: Added block.timestamp check against user-supplied deadline\n        require(block.timestamp <= deadline, \"Transaction expired\");\n        uint256 amountOut = _calculateOut(amountIn);\n        require(amountOut >= minAmountOut, \"Slippage\");\n        _executeSwap(msg.sender, amountIn, amountOut);\n    }\n\n    function _calculateOut(uint256 amount) internal pure returns (uint256) { return amount * 2; }\n    function _executeSwap(address user, uint256 inAmt, uint256 outAmt) internal { }\n}"
+    },
+    {
+        "bug_type": "Destruction of the SmartAccount implementation",
+        "description": "If the SmartAccount implementation contract is left uninitialized, an attacker can initialize it and execute a transaction containing a delegatecall to a contract that executes the selfdestruct opcode. This destroys the implementation contract, freezing all functionality and funds of the wallets pointing to it.",
+        "severity": "CRITICAL",
+        "original_contract": "N/A",
+        "fixed_contract": "constructor() public {\n    owner = address(1);\n}",
+        "id": "vuln_011",
+        "source": "https://code4rena.com/reports/2023-01-biconomy"
+    },
+    {
+        "bug_type": "Theft of funds under relaying the transaction",
+        "description": "The execTransaction function refunds the relayer based on msg.data.length. An attacker can append arbitrary zero bytes to the calldata, which are cheap in gas (4 gas per byte) but refunded at a higher rate (8 gas per byte), allowing the attacker to steal funds via gas refund manipulation.",
+        "severity": "CRITICAL",
+        "original_contract": "N/A",
+        "fixed_contract": "uint256 expectedNumberOfBytes = _tx.data.length + signatures.length + 12 * 32;\nuint256 dataLen = Math.min(msg.data.length, expectedNumberOfBytes);",
+        "id": "vuln_012",
+        "source": "https://code4rena.com/reports/2023-01-biconomy"
+    },
+    {
+        "bug_type": "Attacker can gain control of counterfactual wallet",
+        "description": "The counterfactual wallet address generation does not include the entrypoint address in the salt or init hash. An attacker can deploy a pre-generated wallet address using a malicious custom entrypoint, granting them full control over the wallet and its funds.",
+        "severity": "CRITICAL",
+        "original_contract": "N/A",
+        "fixed_contract": "N/A",
+        "id": "vuln_013",
+        "source": "https://code4rena.com/reports/2023-01-biconomy"
+    },
+    {
+        "bug_type": "Arbitrary transactions possible due to insufficient signature validation",
+        "description": "The checkSignatures function fails to properly validate that the signer or caller is the authorized owner of the contract when processing EIP-1271 signatures. An attacker can supply a fake signer contract that always returns the EIP-1271 magic value, allowing them to execute arbitrary transactions.",
+        "severity": "CRITICAL",
+        "original_contract": "N/A",
+        "fixed_contract": "N/A",
+        "id": "vuln_014",
+        "source": "https://code4rena.com/reports/2023-01-biconomy"
+    },
+    {
+        "bug_type": "Paymaster ETH can be drained with malicious sender",
+        "description": "The paymaster's validation signature lacks replay protection for user operations. A malicious user can take a previously valid sponsored signature and repeatedly execute the transaction through a modified account contract to drain the paymaster's deposit.",
+        "severity": "CRITICAL",
+        "original_contract": "N/A",
+        "fixed_contract": "mapping(bytes32 => boolean) public usedHash;\n\nfunction validatePaymasterUserOp(UserOperation calldata userOp, bytes32, uint256 requiredPreFund) external override returns (bytes memory context, uint256 deadline) {\n    bytes32 hash = getHash(userOp);\n    require(!usedHash[hash], \"used hash\");\n    usedHash[hash] = true;\n}",
+        "id": "vuln_015",
+        "source": "https://code4rena.com/reports/2023-01-biconomy"
+    },
+    {
+        "bug_type": "FeeRefund.tokenGasPriceFactor is not included in signed transaction data allowing the submitter to steal funds",
+        "description": "The encodeTransactionData function does not include the tokenGasPriceFactor parameter in the signed safeTxHash. This allows a transaction submitter to modify the tokenGasPriceFactor after obtaining the user's signature to maliciously increase their gas repayment and steal funds.",
+        "severity": "CRITICAL",
+        "original_contract": "N/A",
+        "fixed_contract": "N/A",
+        "id": "vuln_016",
+        "source": "https://code4rena.com/reports/2023-01-biconomy"
+    },
+    {
+        "bug_type": "Replay attack (EIP712 signed transaction)",
+        "description": "The transaction nonce checks reference nonces[batchId] but do not validate the batchId itself. An attacker can replay a valid first transaction across different batches that share the same nonce value.",
+        "severity": "CRITICAL",
+        "original_contract": "N/A",
+        "fixed_contract": "N/A",
+        "id": "vuln_017",
+        "source": "https://code4rena.com/reports/2023-01-biconomy"
+    },
+    {
+        "bug_type": "Methods used by EntryPoint has onlyOwner modifier",
+        "description": "The execute and executeBatch functions in SmartAccount.sol are incorrectly restricted with the onlyOwner modifier, which prevents the EntryPoint contract from successfully invoking them as part of user operations.",
+        "severity": "MEDIUM",
+        "original_contract": "function execute(address dest, uint value, bytes calldata func) external onlyOwner {\n    _requireFromEntryPointOrOwner();\n    _call(dest, value, func);\n}",
+        "fixed_contract": "function execute(address dest, uint value, bytes calldata func) external {\n    _requireFromEntryPointOrOwner();\n    _call(dest, value, func);\n}",
+        "id": "vuln_018",
+        "source": "https://code4rena.com/reports/2023-01-biconomy"
+    },
+    {
+        "bug_type": "Doesnt Follow ERC1271 Standard",
+        "description": "The implementation uses an incorrect ERC1271 magic value and function signature instead of the official standard specification, causing signature verifications with external contracts to fail or revert.",
+        "severity": "MEDIUM",
+        "original_contract": "N/A",
+        "fixed_contract": "N/A",
+        "id": "vuln_019",
+        "source": "https://code4rena.com/reports/2023-01-biconomy"
+    },
+    {
+        "bug_type": "SmartAccount.sol is intended to be upgradable but inherits from contracts that contain storage and no gaps",
+        "description": "SmartAccount inherits from stateful base contracts like ModuleManager that do not contain storage gaps. Upgrading the contract or adding state variables to these base contracts can cause catastrophic storage slot collisions.",
+        "severity": "MEDIUM",
+        "original_contract": "N/A",
+        "fixed_contract": "uint256[50] private __gap;",
+        "id": "vuln_020",
+        "source": "https://code4rena.com/reports/2023-01-biconomy"
+    }
+]
